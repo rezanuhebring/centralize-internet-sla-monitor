@@ -14,6 +14,28 @@ function api_log($message) {
     file_put_contents($GLOBALS['log_file_api'], date('[Y-m-d H:i:s T] ') . '[SubmitMetrics] ' . $message . PHP_EOL, FILE_APPEND);
 }
 
+/**
+ * Safely retrieves a nested value from an array (decoded JSON payload).
+ *
+ * @param array $array The array to search within.
+ * @param array $keys An array of keys representing the path to the value.
+ * @param string $type The expected type of the value ('text', 'float', 'int').
+ * @return mixed|null The value if found, otherwise null.
+ */
+function get_nested_value($array, $keys, $type = 'text') {
+    $current = $array;
+    foreach ($keys as $key) {
+        if (!isset($current[$key])) {
+            return null;
+        }
+        $current = $current[$key];
+    }
+    if ($current === 'N/A' || $current === '') {
+        return null;
+    }
+    return $type === 'float' ? (float)$current : ($type === 'int' ? (int)$current : $current);
+}
+
 // --- Main Logic ---
 header("Content-Type: application/json");
 
@@ -66,9 +88,6 @@ try {
         $isp_profile_id = $db->lastInsertRowID();
         $stmt_create_profile->close();
     }
-    
-    // Helper function to safely get nested values from JSON payload
-    function get_nested_value($array, $keys, $type = 'text') { $current = $array; foreach ($keys as $key) { if (!isset($current[$key])) return null; $current = $current[$key]; } if ($current === 'N/A' || $current === '') return null; return $type === 'float' ? (float)$current : ($type === 'int' ? (int)$current : $current); }
     
     // Process all incoming metrics
     $ping_status = get_nested_value($input_data, ['ping_summary', 'status']);

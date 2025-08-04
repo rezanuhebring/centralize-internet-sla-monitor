@@ -44,16 +44,35 @@ try {
     $db->close();
 
     if ($profile_config) {
-        // Convert numeric strings from DB to actual numbers for JSON consistency
+        // Refactor: Improve maintainability of type conversion.
+        // SQLite returns all values as strings, so we must explicitly cast to numeric types for JSON consistency.
+        // This list contains columns that should remain strings even if they appear numeric (e.g., an agent_identifier of "12345").
+        $string_columns = [
+            'agent_name', 'agent_identifier', 'agent_type', 'network_interface_to_monitor',
+            'teams_webhook_url', 'alert_hostname_override', 'notes', 'last_heard_from',
+            'last_reported_hostname', 'last_reported_source_ip'
+        ];
+
         foreach ($profile_config as $key => &$value) {
-            if (is_numeric($value) && !in_array($key, ['agent_name', 'agent_identifier', 'agent_type', 'network_interface_to_monitor', 'teams_webhook_url', 'alert_hostname_override', 'notes', 'last_heard_from', 'last_reported_hostname', 'last_reported_source_ip'])) { 
-                if (strpos($value, '.') !== false) { $value = (float)$value;} else { $value = (int)$value;}
-            } elseif ($value === "NULL" || is_null($value)) {
-                $value = null; 
+            if (is_null($value) || $value === "NULL") {
+                $value = null;
+                continue;
             }
-        } unset($value);
-        api_log_get_profile("Served profile config for agent: " . $agent_identifier); echo json_encode($profile_config);
-    } else { 
+
+            // Cast to number if the value is numeric AND the column is not in our explicit string list.
+            if (is_numeric($value) && !in_array($key, $string_columns)) {
+                if (strpos($value, '.') !== false) {
+                    $value = (float)$value;
+                } else {
+                    $value = (int)$value;
+                }
+            }
+        }
+        unset($value);
+
+        api_log_get_profile("Served profile config for agent: " . $agent_identifier);
+        echo json_encode($profile_config);
+    } else {
         http_response_code(404); api_log_get_profile("Profile config not found for agent: " . $agent_identifier); 
         echo json_encode(['error' => "Profile not found for agent_id '{$agent_identifier}'. Agent will be auto-created on next data submission with default thresholds."]); 
     }
