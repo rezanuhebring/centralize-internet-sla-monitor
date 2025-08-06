@@ -42,9 +42,9 @@ $response_data = [
 try {
     $config_values = parse_env_file($config_file_path_central);
     $response_data['dashboard_refresh_interval_ms'] = (int)($config_values['DASHBOARD_REFRESH_INTERVAL_MS'] ?? 60000);
-    $response_data['target_sla_percentage'] = (float)($config_values['SLA_TARGET_PERCENTAGE'] ?? 99.5);
+    $response_data['target_sla_percentage'] = (float)($config_values['DEFAULT_PROFILE_SLA_TARGET_PERCENTAGE'] ?? 99.5);
     $response_data['agent_stale_minutes'] = (int)($config_values['AGENT_STALE_MINUTES'] ?? ($EXPECTED_INTERVAL_MINUTES + 5));
-    $response_data['api_key'] = $config_values['CENTRAL_API_KEY'] ?? 'Not Set';
+    $response_data['api_key'] = $config_values['CENTRAL_API_KEY'] ?? 'API Key not found in config';
 
     if (!file_exists($db_file)) { throw new Exception("Central database file not found."); }
     $db = new SQLite3($db_file, SQLITE3_OPEN_READONLY);
