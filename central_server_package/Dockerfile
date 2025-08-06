@@ -89,7 +89,7 @@ COPY ./app/ .
 
 # Set correct ownership and permissions for the web root.
 RUN chown -R www-data:www-data /var/www/html && \
-    find /var/www/html -type d -exec chmod 755 {} \;
+    find /var/www/html -type d -exec chmod 755 {} \; && \
     find /var/www/html -type f -exec chmod 644 {} \;
 
 # Expose HTTP and HTTPS ports.
