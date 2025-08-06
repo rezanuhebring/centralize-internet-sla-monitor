@@ -79,10 +79,11 @@
                 <div class="grid-container">
                     <div class="card"><h3>Live Status</h3><p><span>Last Check:</span><strong id="last-checked"></strong></p><p><span>Connectivity:</span><strong id="ping-status"></strong></p><p><span>RTT:</span><strong id="ping-rtt"></strong></p><p><span>Loss:</span><strong id="ping-loss"></strong></p><p><span>Jitter:</span><strong id="ping-jitter"></strong></p></div>
                     <div class="card"><h3>Speedtest</h3><p><span>Download:</span><strong id="speed-dl"></strong></p><p><span>Upload:</span><strong id="speed-ul"></strong></p><p><span>Ping (ISP):</span><strong id="speed-ping"></strong></p></div>
+                    <div class="card"><h3>Wi-Fi Status</h3><p><span>SSID:</span><strong id="wifi-ssid"></strong></p><p><span>Signal:</span><strong id="wifi-signal"></strong></p><p><span>Band / Channel:</span><strong id="wifi-band-channel"></strong></p></div>
                     <!-- UPDATED: SLA Card with Progress Bars -->
                     <div class="card"><h3>Service Level Agreement (<span class="period-label"></span>)</h3><div id="historical-sla-data"></div></div>
                 </div>
-                <div class="chart-card card" style="margin-top:20px;"><h3>Historical Performance (<span class="period-label"></span>)</h3><div class="chart-container"><canvas id="rttChart"></canvas></div><div class="chart-container" style="margin-top:20px;"><canvas id="speedTestChart"></canvas></div></div>
+                <div class="chart-card card" style="margin-top:20px;"><h3>Historical Performance (<span class="period-label"></span>)</h3><div class="chart-container"><canvas id="rttChart"></canvas></div><div class="chart-container" style="margin-top:20px;"><canvas id="speedTestChart"></canvas></div><div class="chart-container" style="margin-top:20px;"><canvas id="wifiChart"></canvas></div></div>
             </div>
         </div>
     </div>
@@ -222,6 +223,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('ping-status', latest?.overall_connectivity); setText('ping-rtt', latest?.avg_rtt_ms, ' ms'); setText('ping-loss', latest?.avg_loss_percent, ' %'); setText('ping-jitter', latest?.avg_jitter_ms, ' ms');
         setText('speed-dl', latest?.speedtest_download_mbps, ' Mbps'); setText('speed-ul', latest?.speedtest_upload_mbps, ' Mbps');setText('speed-ping', latest?.speedtest_ping_ms, ' ms');
 
+        // New Wi-Fi card population
+        setText('wifi-ssid', latest?.wifi_ssid);
+        setText('wifi-signal', latest?.wifi_signal_strength_percent, '%');
+        setText('wifi-band-channel', (latest?.wifi_band && latest?.wifi_channel) ? `${latest.wifi_band} / Ch. ${latest.wifi_channel}` : 'N/A');
+
         // UPDATED: Render SLA with progress bars
         const slaContainer = document.getElementById('historical-sla-data');
         slaContainer.innerHTML = `<h3 style="margin-bottom:10px;">SLA (Target: ${data.target_sla_percentage}%)</h3>`;
@@ -236,11 +242,12 @@ document.addEventListener('DOMContentLoaded', () => {
         
         renderChart('rttChart', { 'Avg RTT (ms)': 'avg_rtt_ms', 'Avg Jitter (ms)': 'avg_jitter_ms', 'Packet Loss (%)': 'avg_loss_percent' }, data.rtt_chart_data, 'timestamp');
         renderChart('speedTestChart', { 'Download (Mbps)': 'speedtest_download_mbps', 'Upload (Mbps)': 'speedtest_upload_mbps' }, data.speed_chart_data, 'timestamp');
+        renderChart('wifiChart', { 'Wi-Fi Signal Strength (%)': 'wifi_signal_strength_percent' }, data.wifi_chart_data, 'timestamp', { yAxisLabel: '%' });
         summaryView.classList.add('hidden'); detailView.classList.remove('hidden');
     };
     
     // UPDATED: More robust chart rendering function
-    const renderChart = (canvasId, seriesConfig, data, xKey) => {
+    const renderChart = (canvasId, seriesConfig, data, xKey, options = {}) => {
         const ctx = document.getElementById(canvasId)?.getContext('2d'); if (!ctx) return;
         if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
 
@@ -278,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 y: {
                     beginAtZero: true, position: 'left',
-                    grid: { color: gridColor }, ticks: { color: textColor, callback: (value) => `${value} ms` }
+                    grid: { color: gridColor }, ticks: { color: textColor, callback: (value) => `${value}${options.yAxisLabel || ' ms'}` }
                 }
             },
             plugins: {

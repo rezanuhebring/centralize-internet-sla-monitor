@@ -151,9 +151,50 @@ internet-sla-monitor/
 
 ## Troubleshooting
 
-*   **Central Docker Logs:** `sudo docker logs sla_monitor_central_app`
-*   **Central API Log (on host):** `/srv/sla_monitor/central_app_data/api_logs/sla_api.log`
-*   **Agent Logs:** `/var/log/internet_sla_monitor_agent.log` (Linux) or `C:\SLA_Monitor_Agent\internet_monitor_agent_windows.log` (Windows).
-*   **Apache Error Log (in container, mapped to host):** `/srv/sla_monitor/central_app_data/apache_logs/error.log`
-*   Access PHP API endpoints directly in a browser or with `curl` for debugging JSON output or errors.
-    *   `http://<central_server_ip>/api/get_profile_config.php?agent_id=<YOUR_AGENT_ID>`
+### Central Server Issues
+*   **Docker Container Not Running:** Check the status with `sudo docker ps -a`. If the `sla_monitor_central_app` container is `Exited`, check its logs for errors: `sudo docker logs sla_monitor_central_app`.
+*   **Dashboard Not Loading:**
+    *   Ensure the container is running.
+    *   Check host firewall rules to ensure port 80 (or your custom port) is allowed.
+    *   Look for errors in the Apache error log on the host: `/srv/sla_monitor/central_app_data/apache_logs/error.log`.
+*   **API Errors:**
+    *   Check the central API log on the host: `/srv/sla_monitor/central_app_data/api_logs/sla_api.log`.
+    *   Access PHP API endpoints directly in a browser or with `curl` for debugging JSON output or errors.
+        *   `http://<central_server_ip>/api/get_profile_config.php?agent_id=<YOUR_AGENT_ID>`
+        *   This should return the JSON profile for the agent or an error message.
+
+### Agent Troubleshooting
+
+**General Agent Issues:**
+*   **Data Not Appearing on Dashboard:**
+    1.  **Check Agent Logs First:** This is the most important step.
+        *   **Linux:** `tail -f /var/log/internet_sla_monitor_agent.log`
+        *   **Windows:** `Get-Content "C:\SLA_Monitor_Agent\internet_monitor_agent_windows.log" -Tail 10 -Wait`
+    2.  **Look for "Failed to submit data" errors.** This usually points to a network issue or a problem with the `CENTRAL_API_URL`.
+    3.  **Verify `CENTRAL_API_URL`:** Make sure the IP address or hostname is correct and that the agent machine can reach it. Use `ping <central_server_ip>` or `curl http://<central_server_ip>/api/submit_metrics.php` from the agent machine.
+    4.  **Check `AGENT_IDENTIFIER`:** Ensure the `AGENT_IDENTIFIER` in the agent's config file matches exactly with an entry in the `isp_profiles` table on the central server. Remember that identifiers are case-sensitive.
+
+**Windows Agent Specific Issues:**
+*   **Script Fails to Run:**
+    *   **Execution Policy:** PowerShell's execution policy might prevent the script from running. The scheduled task created by the setup script uses `-ExecutionPolicy Bypass`, but if you run it manually, you might need to open an Administrator PowerShell and run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process` first.
+    *   **Permissions:** Ensure the `C:\SLA_Monitor_Agent` directory and its contents are readable by the `SYSTEM` account, as that's what the scheduled task runs as.
+*   **"Speedtest not found" or "FAILED_EXEC" in logs:**
+    *   The `setup_agent_windows.ps1` script automatically installs Speedtest to `C:\SLA_Monitor_Agent\speedtest`.
+    *   Verify that `speedtest.exe` exists in that directory.
+    *   Check the `agent_config.ps1` file and ensure the `$SPEEDTEST_EXE_PATH` variable is set correctly. The setup script should do this automatically.
+    *   Run `speedtest.exe` manually from a command prompt to ensure it works and that the license has been accepted.
+*   **Scheduled Task Not Running:**
+    *   Open "Task Scheduler" and find the "InternetSLAMonitorAgent" task.
+    *   Check the "History" tab for any errors.
+    *   Verify the task is configured to run as `NT AUTHORITY\SYSTEM` and that "Run with highest privileges" is checked.
+
+**Linux Agent Specific Issues:**
+*   **`jq: command not found` or other dependency errors:**
+    *   Re-run the setup script `sudo ./setup_agent_linux.sh`. It is designed to install all necessary dependencies.
+    *   If it fails, install them manually: `sudo apt-get update && sudo apt-get install -y curl jq bc dnsutils inetutils-ping sqlite3 speedtest-cli`.
+*   **Permission Denied errors in log:**
+    *   Ensure the agent was set up using `sudo`. The log file and configuration need correct ownership.
+    *   Check permissions on `/opt/sla_monitor` and `/var/log/internet_sla_monitor_agent.log`. The user running the cron job (typically root) must have write access.
+*   **Cron Job Not Running:**
+    *   Check that the cron job exists: `sudo crontab -l`. You should see an entry for `monitor_internet.sh`.
+    *   Check the system's cron logs (e.g., `/var/log/syslog` or `/var/log/cron.log`) for any errors related to the script execution.
