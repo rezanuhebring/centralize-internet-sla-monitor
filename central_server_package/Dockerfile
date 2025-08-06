@@ -82,15 +82,15 @@ RUN a2enmod rewrite headers ssl expires
 COPY ./docker/apache/000-default.conf /etc/apache2/sites-available/000-default.conf
 
 # Set the web root as the working directory.
-WORKDIR /var/www/html/sla_status
+WORKDIR /var/www/html
 
 # Copy your application files.
 COPY ./app/ .
 
 # Set correct ownership and permissions for the web root.
-RUN chown -R www-data:www-data /var/www/html/sla_status && \
-    find /var/www/html/sla_status -type d -exec chmod 755 {} \; && \
-    find /var/www/html/sla_status -type f -exec chmod 644 {} \;
+RUN chown -R www-data:www-data /var/www/html && \
+    find /var/www/html -type d -exec chmod 755 {} \;
+    find /var/www/html -type f -exec chmod 644 {} \;
 
 # Expose HTTP and HTTPS ports.
 EXPOSE 80
