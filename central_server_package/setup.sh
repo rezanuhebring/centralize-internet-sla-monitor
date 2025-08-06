@@ -79,7 +79,7 @@ while true; do
     echo
     read -s -p "Confirm the password: " DASHBOARD_PASSWORD_CONFIRM
     echo
-    if [ "$DASHBOARD_PASSWORD" = "$DASHBOARD_PASSWORD_CONFIRM" ] && [ -n "$DASHBOARD_PASSWORD" ]; then
+    if [[ "$DASHBOARD_PASSWORD" = "$DASHBOARD_PASSWORD_CONFIRM" && -n "$DASHBOARD_PASSWORD" ]]; then
         break
     else
         print_error "Passwords do not match or are empty. Please try again."
