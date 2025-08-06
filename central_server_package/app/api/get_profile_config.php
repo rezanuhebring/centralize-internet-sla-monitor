@@ -1,13 +1,39 @@
 <?php
 // /var/www/html/sla_status/api/get_profile_config.php
 $db_file = '/opt/sla_monitor/central_sla_data.sqlite';
+$config_file = '/opt/sla_monitor/sla_config.env';
 $log_file_api = '/var/log/sla_api.log'; 
+
 function api_log_get_profile($message) { file_put_contents($GLOBALS['log_file_api'], date('[Y-m-d H:i:s T] ') . '[GetProfileCfg] ' . $message . PHP_EOL, FILE_APPEND); }
+
+function load_config($file_path) {
+    if (!file_exists($file_path)) return [];
+    $lines = file($file_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $config = [];
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) continue;
+        list($key, $value) = explode('=', $line, 2);
+        $config[trim($key)] = trim($value);
+    }
+    return $config;
+}
 
 header("Content-Type: application/json");
 header('Cache-Control: no-cache, must-revalidate, no-store, max-age=0');
 
-// TODO: Implement robust API Key Authentication here
+// --- API Key Authentication ---
+$config = load_config($config_file);
+$master_api_key = $config['CENTRAL_API_KEY'] ?? '';
+
+if (!empty($master_api_key)) {
+    $provided_api_key = $_SERVER['HTTP_X_API_KEY'] ?? '';
+    if (!hash_equals($master_api_key, $provided_api_key)) {
+        http_response_code(401);
+        api_log_get_profile("Unauthorized: Invalid or missing API key from client trying to get profile.");
+        echo json_encode(['error' => 'Unauthorized: API Key is invalid or missing.']);
+        exit;
+    }
+}
 
 $agent_identifier = $_GET['agent_id'] ?? null;
 if (empty($agent_identifier)) { http_response_code(400); api_log_get_profile("Missing agent_id."); echo json_encode(['error' => 'Missing agent_id parameter.']); exit;}
