@@ -45,7 +45,7 @@ if [ "$(id -u)" -ne 0 ]; then print_error "This script must be run with sudo: su
 # --- Step 0: Detect Mode (Fresh Install vs. Migration) ---
 MIGRATION_MODE=false
 if [ -d "${HOST_DATA_ROOT}" ]; then
-    print_warn "Existing data found at ${HOST_DATA_ROOT}."
+    print_warn "Existing data found at ${HOST_DATA_ROOT}".
     print_warn "Entering MIGRATION mode. Your data will be preserved."
     MIGRATION_MODE=true
     
@@ -70,15 +70,30 @@ if [ -z "$DOMAIN_NAME" ]; then print_error "Domain name cannot be empty. Abortin
 read -p "Enter your email address (for Let's Encrypt renewal notices): " EMAIL_ADDRESS
 if [ -z "$EMAIL_ADDRESS" ]; then print_error "Email address cannot be empty. Aborting."; exit 1; fi
 
+# --- Step 1b: Gather Dashboard Credentials ---
+print_info "Please set up the credentials for the dashboard login."
+read -p "Enter a username for the dashboard [admin]: " DASHBOARD_USERNAME
+DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
+while true; do
+    read -s -p "Enter a password for the dashboard: " DASHBOARD_PASSWORD
+    echo
+    read -s -p "Confirm the password: " DASHBOARD_PASSWORD_CONFIRM
+    echo
+    if [ "$DASHBOARD_PASSWORD" = "$DASHBOARD_PASSWORD_CONFIRM" ] && [ -n "$DASHBOARD_PASSWORD" ]; then
+        break
+    else
+        print_error "Passwords do not match or are empty. Please try again."
+    fi
+done
+
 # --- Step 2: Install System Dependencies ---
 print_info "Updating package lists and checking dependencies..."
 sudo apt-get update -y || { print_error "Apt update failed."; exit 1; }
 
 # Install Docker, Docker Compose, Certbot, SQLite3
-# (Assuming these installations are robust and no changes needed here)
 if ! command -v docker &> /dev/null; then print_info "Installing Docker..."; sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common jq && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - && sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" -y && sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io || { print_error "Docker installation failed"; exit 1; }; sudo systemctl start docker && sudo systemctl enable docker; else print_info "Docker is already installed."; fi
 if ! command -v docker-compose &> /dev/null; then print_info "Installing Docker Compose..."; LATEST_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name); [ -z "$LATEST_COMPOSE_VERSION" ] && LATEST_COMPOSE_VERSION="v2.24.6"; sudo curl -L "https://github.com/docker/compose/releases/download/${LATEST_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose || { print_error "Docker Compose download failed"; exit 1; }; else print_info "Docker Compose is already installed."; fi
-if ! command -v certbot &> /dev/null || ! command -v sqlite3 &> /dev/null; then print_info "Installing Certbot and SQLite3..."; sudo apt-get install -y certbot sqlite3; else print_info "Certbot and SQLite3 are already installed."; fi
+if ! command -v certbot &> /dev/null || ! command -v sqlite3 &> /dev/null; then print_info "Installing Certbot and SQLite3..."; sudo apt-get install -y certbot sqlite3 php-cli; else print_info "Certbot, SQLite3, and PHP CLI are already installed."; fi
 
 # --- Step 3: Create Directories and Docker Files ---
 print_info "Creating host directories and Docker configurations..."
@@ -142,7 +157,6 @@ networks:
 EOF_DOCKER_COMPOSE
 
 # --- Step 4: Phased Certificate Acquisition ---
-# (No changes needed to this section)
 print_info "Starting Phase 1: Acquiring SSL Certificate..."
 tee "./${NGINX_CONFIG_DIR}/${NGINX_CONFIG_FILE}" > /dev/null <<EOF_NGINX_TEMP
 server { listen 80; server_name ${DOMAIN_NAME}; location /.well-known/acme-challenge/ { root /var/www/certbot; } location / { return 404; } }
@@ -156,7 +170,6 @@ sudo docker-compose down
 
 # --- Step 5: Final Configuration and Launch ---
 print_info "Starting Phase 2: Deploying final secure configuration..."
-# (No changes needed to Nginx final config)
 tee "./${NGINX_CONFIG_DIR}/${NGINX_CONFIG_FILE}" > /dev/null <<EOF_NGINX_FINAL
 server { listen 80; server_name ${DOMAIN_NAME}; location /.well-known/acme-challenge/ { root /var/www/certbot; } location / { return 301 https://\$host\$request_uri; } }
 server {
@@ -179,7 +192,6 @@ if [ ! -f /etc/letsencrypt/ssl-dhparams.pem ]; then sudo openssl dhparam -out /e
 API_KEY=""
 if [ "${MIGRATION_MODE}" = false ]; then
     print_info "Initializing database and configuration for new installation..."
-    # Create DB Schema
     sudo touch "${SQLITE_DB_FILE_HOST_PATH}"
     sudo sqlite3 "${SQLITE_DB_FILE_HOST_PATH}" "
         PRAGMA journal_mode=WAL;
@@ -218,25 +230,20 @@ if [ "${MIGRATION_MODE}" = false ]; then
         CREATE INDEX IF NOT EXISTS idx_sla_metrics_isp_profile_id ON sla_metrics (isp_profile_id);
     "
     
-    # Generate and store API Key
     API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+    PASSWORD_HASH=$(php -r "echo password_hash('$DASHBOARD_PASSWORD', PASSWORD_DEFAULT);")
     print_info "Generating new configuration file..."
     sudo cp "./${APP_SOURCE_SUBDIR}/${SLA_CONFIG_TEMPLATE_NAME}" "${SLA_CONFIG_HOST_PATH}"
     sudo sed -i "s/CENTRAL_API_KEY=.*/CENTRAL_API_KEY=${API_KEY}/" "${SLA_CONFIG_HOST_PATH}"
+    echo "DASHBOARD_USERNAME=${DASHBOARD_USERNAME}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
+    echo "DASHBOARD_PASSWORD_HASH=${PASSWORD_HASH}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
+
 else
     print_info "Existing database found. Checking for schema updates..."
-    # Self-healing: Add new Wi-Fi columns if they don't exist
     COLUMNS_EXIST=$(sudo sqlite3 "${SQLITE_DB_FILE_HOST_PATH}" "SELECT count(*) FROM pragma_table_info('sla_metrics') WHERE name IN ('wifi_status', 'wifi_ssid');")
     if [ "$COLUMNS_EXIST" -eq 0 ]; then
         print_info "Adding new Wi-Fi monitoring columns to the sla_metrics table..."
-        sudo sqlite3 "${SQLITE_DB_FILE_HOST_PATH}" "
-            ALTER TABLE sla_metrics ADD COLUMN wifi_status TEXT;
-            ALTER TABLE sla_metrics ADD COLUMN wifi_ssid TEXT;
-            ALTER TABLE sla_metrics ADD COLUMN wifi_bssid TEXT;
-            ALTER TABLE sla_metrics ADD COLUMN wifi_signal_strength_percent INTEGER;
-            ALTER TABLE sla_metrics ADD COLUMN wifi_channel INTEGER;
-            ALTER TABLE sla_metrics ADD COLUMN wifi_band TEXT;
-        "
+        sudo sqlite3 "${SQLITE_DB_FILE_HOST_PATH}" "ALTER TABLE sla_metrics ADD COLUMN wifi_status TEXT; ALTER TABLE sla_metrics ADD COLUMN wifi_ssid TEXT; ALTER TABLE sla_metrics ADD COLUMN wifi_bssid TEXT; ALTER TABLE sla_metrics ADD COLUMN wifi_signal_strength_percent INTEGER; ALTER TABLE sla_metrics ADD COLUMN wifi_channel INTEGER; ALTER TABLE sla_metrics ADD COLUMN wifi_band TEXT;"
     else
         print_info "Wi-Fi columns already exist. No schema changes needed."
     fi
@@ -248,11 +255,20 @@ else
             API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
             sudo echo -e "\nCENTRAL_API_KEY=${API_KEY}" >> "${SLA_CONFIG_HOST_PATH}"
         fi
+        if ! grep -q "^DASHBOARD_USERNAME=" "${SLA_CONFIG_HOST_PATH}"; then
+            print_warn "Dashboard credentials not found. Adding them now."
+            PASSWORD_HASH=$(php -r "echo password_hash('$DASHBOARD_PASSWORD', PASSWORD_DEFAULT);")
+            echo "DASHBOARD_USERNAME=${DASHBOARD_USERNAME}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
+            echo "DASHBOARD_PASSWORD_HASH=${PASSWORD_HASH}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
+        fi
     else
-        print_warn "Config file not found! Creating one with a new API key."
+        print_warn "Config file not found! Creating one with a new API key and credentials."
         API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+        PASSWORD_HASH=$(php -r "echo password_hash('$DASHBOARD_PASSWORD', PASSWORD_DEFAULT);")
         sudo cp "./${APP_SOURCE_SUBDIR}/${SLA_CONFIG_TEMPLATE_NAME}" "${SLA_CONFIG_HOST_PATH}"
         sudo sed -i "s/CENTRAL_API_KEY=.*/CENTRAL_API_KEY=${API_KEY}/" "${SLA_CONFIG_HOST_PATH}"
+        echo "DASHBOARD_USERNAME=${DASHBOARD_USERNAME}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
+        echo "DASHBOARD_PASSWORD_HASH=${PASSWORD_HASH}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
     fi
 fi
 
@@ -273,6 +289,7 @@ if [ $? -eq 0 ]; then
     echo
     print_info "--------------------------------------------------------------------"
     print_success "Dashboard available at: https://${DOMAIN_NAME}"
+    print_warn "Login with username '${DASHBOARD_USERNAME}' and the password you provided."
     print_warn "Your agents must use the following API Key in their configuration:"
     print_highlight "API Key: ${API_KEY}"
     print_info "--------------------------------------------------------------------"

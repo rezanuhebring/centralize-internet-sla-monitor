@@ -1,3 +1,10 @@
+<?php
+session_start();
+if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+    header('Location: login.html');
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,6 +20,8 @@
         .dashboard-container { max-width: 1400px; margin: 0 auto; background-color: var(--card-bg); padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px var(--shadow-color); }
         h1 { font-size: 2em; margin: 0; } h2 { font-size: 1.5em; margin-top: 30px; margin-bottom: 20px; text-align: left; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;}
         .top-bar { display: flex; justify-content: space-between; align-items: center; }
+        .top-controls { display: flex; align-items: center; gap: 20px; }
+        .logout-button { padding: 8px 12px; background-color: var(--orange); color: white; border: none; border-radius: 4px; text-decoration: none; font-weight: 500; }
         .top-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 15px; }
         .selector-group { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
         .selector-group label { font-weight: 500; }
@@ -42,6 +51,8 @@
         .card { background-color: var(--bg-color); padding: 20px; border-radius: 8px; }
         .card h3 { margin-top: 0; padding-bottom: 10px; font-size: 1.2em; border-bottom: 1px solid var(--border-color); }
         .card p { margin: 10px 0; font-size: 1em; display: flex; justify-content: space-between; } .card strong { font-weight: 600; }
+        .api-key-card { background-color: var(--bg-color); padding: 15px; border-radius: 8px; margin-top: 20px; }
+        .api-key-card input { width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--card-bg); color: var(--text-color); font-family: monospace; }
         .chart-card { grid-column: 1 / -1; }
         .chart-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
         .chart-zoom-controls { display: flex; gap: 8px; }
@@ -62,19 +73,30 @@
 </head>
 <body>
     <div class="dashboard-container">
-        <div class="top-bar"><h1>Internet Performance Monitor</h1><div class="theme-switcher"><span class="theme-switcher-label">Dark Mode</span><label class="switch"><input type="checkbox" id="theme-toggle"><span class="slider"></span></label></div></div>
+        <div class="top-bar">
+            <h1>Internet Performance Monitor</h1>
+            <div class="top-controls">
+                <div class="theme-switcher"><span class="theme-switcher-label">Dark Mode</span><label class="switch"><input type="checkbox" id="theme-toggle"><span class="slider"></span></label></div>
+                <a href="logout.php" class="logout-button">Logout</a>
+            </div>
+        </div>
         <div class="top-info"><div class="selector-group"><label for="isp-profile-selector">View:</label><select id="isp-profile-selector"><option value="">-- Overall Summary --</option></select></div><div class="selector-group"><label>Period:</label><div class="time-period-selector"><button data-period="1" class="active">24h</button><button data-period="7">7d</button><button data-period="30">30d</button><button data-period="365">1y</button></div></div></div>
         <div id="loader" class="loader"></div>
         <div id="dashboard-content" class="hidden">
             <div id="summary-view" class="hidden">
                 <h2>System-Wide Health Summary</h2>
-                <!-- NEW: Key Metrics Section -->
                 <div class="grid-container" id="key-metrics-container" style="margin-bottom: 20px;">
                     <div class="card key-metric-card"><div id="metric-total-agents" class="key-metric-value">0</div><div class="key-metric-label">Active Agents</div></div>
                     <div class="card key-metric-card"><div id="metric-agents-issue" class="key-metric-value">0</div><div class="key-metric-label">Agents with Issues</div></div>
                     <div class="card key-metric-card"><div id="metric-system-rtt" class="key-metric-value">0</div><div class="key-metric-label">Avg. System RTT (ms)</div></div>
                 </div>
-                <div class="grid-container"><div class="card"><h3>System-Wide ISP SLA</h3><div id="overall-sla-periods"></div><div class="download-button-container"><a id="summary-csv-download" href="generate_csv.php" download="all_agents_summary.csv" class="download-button">💾 Download All Agent Status</a></div></div></div>
+                <div class="grid-container">
+                    <div class="card"><h3>System-Wide ISP SLA</h3><div id="overall-sla-periods"></div><div class="download-button-container"><a id="summary-csv-download" href="generate_csv.php" download="all_agents_summary.csv" class="download-button">💾 Download All Agent Status</a></div></div>
+                    <div class="card api-key-card">
+                        <h3>Agent API Key</h3>
+                        <input type="text" id="api-key-display" readonly value="Loading...">
+                    </div>
+                </div>
                 <div class="agent-lists-container" style="margin-top: 20px;"><div class="card"><h3>Active ISP Agents</h3><ul id="isp-agent-list" class="agent-list"></ul></div><div class="card"><h3>Active Client Agents</h3><ul id="client-agent-list" class="agent-list"></ul></div></div>
                 <div class="chart-card card" style="margin-top:20px;">
                     <div class="chart-header">
@@ -93,7 +115,6 @@
                     <div class="card"><h3>Live Status</h3><p><span>Last Check:</span><strong id="last-checked"></strong></p><p><span>Connectivity:</span><strong id="ping-status"></strong></p><p><span>RTT:</span><strong id="ping-rtt"></strong></p><p><span>Loss:</span><strong id="ping-loss"></strong></p><p><span>Jitter:</span><strong id="ping-jitter"></strong></p></div>
                     <div class="card"><h3>Speedtest</h3><p><span>Download:</span><strong id="speed-dl"></strong></p><p><span>Upload:</span><strong id="speed-ul"></strong></p><p><span>Ping (ISP):</span><strong id="speed-ping"></strong></p></div>
                     <div class="card"><h3>Wi-Fi Status</h3><p><span>SSID:</span><strong id="wifi-ssid"></strong></p><p><span>Signal:</span><strong id="wifi-signal"></strong></p><p><span>Band / Channel:</span><strong id="wifi-band-channel"></strong></p></div>
-                    <!-- UPDATED: SLA Card with Progress Bars -->
                     <div class="card"><h3>Service Level Agreement (<span class="period-label"></span>)</h3><div id="historical-sla-data"></div></div>
                 </div>
                 <div class="chart-card card" style="margin-top:20px;">
@@ -123,9 +144,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailView = document.getElementById('detail-view');
     const periodSelector = document.querySelector('.time-period-selector');
     const themeToggle = document.getElementById('theme-toggle');
+    const apiKeyDisplay = document.getElementById('api-key-display');
 
     const setText = (id, value, unit = '') => { const el = document.getElementById(id); if (el) el.textContent = (value !== null && value !== undefined && String(value).trim() !== '') ? `${String(value).trim()}${unit}` : 'N/A'; };
     const setHtml = (id, value) => { const el = document.getElementById(id); if (el) el.innerHTML = value; };
+    const setValue = (id, value) => { const el = document.getElementById(id); if (el) el.value = value || 'N/A'; };
 
     const fetchAndUpdateDashboard = async (agentId = null, period = currentPeriodDays) => {
         currentPeriodDays = period;
@@ -136,11 +159,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const response = await fetch(url);
+            if (response.status === 401) { window.location.href = 'login.html'; return; }
             if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
             const data = await response.json();
             if (data.error) throw new Error(data.message || 'Unknown server error');
 
             if (!profileSelector.getAttribute('data-populated')) updateProfileSelector(data.isp_profiles, agentId);
+            
+            setValue('api-key-display', data.api_key);
 
             document.querySelectorAll('.time-period-selector button').forEach(b => b.classList.toggle('active', b.dataset.period === period));
             document.querySelectorAll('.period-label').forEach(el => el.textContent = `${period} day(s)`);
