@@ -4,6 +4,8 @@
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Internet Performance Monitor</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" defer></script>
     <style>
         :root { --bg-color: #f0f2f5; --card-bg: #ffffff; --text-color: #333; --header-color: #1a237e; --border-color: #e0e0e0; --link-color: #007bff; --shadow-color: rgba(0,0,0,0.1); --green: #28a745; --red: #dc3545; --orange: #fd7e14; --grey: #6c757d; --progress-bg: #e9ecef;}
         .dark-mode { --bg-color: #121212; --card-bg: #1e1e1e; --text-color: #e0e0e0; --header-color: #bb86fc; --border-color: #444; --link-color: #bb86fc; --shadow-color: rgba(0,0,0,0.4); --progress-bg: #333; }
@@ -14,7 +16,7 @@
         .top-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 15px; }
         .selector-group { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
         .selector-group label { font-weight: 500; }
-        .selector-group select, .time-period-selector button { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 1em; background-color: var(--card-bg); color: var(--text-color); cursor: pointer; }
+        .selector-group select, .time-period-selector button, .chart-zoom-controls button { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 1em; background-color: var(--card-bg); color: var(--text-color); cursor: pointer; }
         .selector-group select { flex-grow: 1; min-width: 250px; }
         .time-period-selector button.active { background-color: var(--link-color); color: white; border-color: var(--link-color); }
         .theme-switcher { display: flex; align-items: center; cursor: pointer; } .theme-switcher-label { margin-right: 8px; font-weight: 500;}
@@ -41,6 +43,8 @@
         .card h3 { margin-top: 0; padding-bottom: 10px; font-size: 1.2em; border-bottom: 1px solid var(--border-color); }
         .card p { margin: 10px 0; font-size: 1em; display: flex; justify-content: space-between; } .card strong { font-weight: 600; }
         .chart-card { grid-column: 1 / -1; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .chart-zoom-controls { display: flex; gap: 8px; }
         .chart-container { width: 100%; height: 350px; }
         /* NEW: Key Metrics styles */
         .key-metric-card { text-align: center; }
@@ -72,7 +76,16 @@
                 </div>
                 <div class="grid-container"><div class="card"><h3>System-Wide ISP SLA</h3><div id="overall-sla-periods"></div><div class="download-button-container"><a id="summary-csv-download" href="generate_csv.php" download="all_agents_summary.csv" class="download-button">💾 Download All Agent Status</a></div></div></div>
                 <div class="agent-lists-container" style="margin-top: 20px;"><div class="card"><h3>Active ISP Agents</h3><ul id="isp-agent-list" class="agent-list"></ul></div><div class="card"><h3>Active Client Agents</h3><ul id="client-agent-list" class="agent-list"></ul></div></div>
-                <div class="chart-card card" style="margin-top:20px;"><h3>System-Wide Daily Averages (<span class="period-label"></span>)</h3><div class="chart-container"><canvas id="cumulativeRttChart"></canvas></div><div class="chart-container" style="margin-top:20px;"><canvas id="cumulativeSpeedChart"></canvas></div></div>
+                <div class="chart-card card" style="margin-top:20px;">
+                    <div class="chart-header">
+                        <h3>System-Wide Daily Averages (<span class="period-label"></span>)</h3>
+                        <div class="chart-zoom-controls" data-chart="cumulativeRttChart">
+                            <button data-zoom="in">Zoom In</button><button data-zoom="out">Zoom Out</button><button data-zoom="reset">Reset</button>
+                        </div>
+                    </div>
+                    <div class="chart-container"><canvas id="cumulativeRttChart"></canvas></div>
+                    <div class="chart-container" style="margin-top:20px;"><canvas id="cumulativeSpeedChart"></canvas></div>
+                </div>
             </div>
             <div id="detail-view" class="hidden">
                 <h2 id="agent-name-header"></h2><div class="download-button-container"><a id="individual-csv-download" href="#" class="download-button">💾 Download Agent Data (CSV)</a></div>
@@ -83,7 +96,17 @@
                     <!-- UPDATED: SLA Card with Progress Bars -->
                     <div class="card"><h3>Service Level Agreement (<span class="period-label"></span>)</h3><div id="historical-sla-data"></div></div>
                 </div>
-                <div class="chart-card card" style="margin-top:20px;"><h3>Historical Performance (<span class="period-label"></span>)</h3><div class="chart-container"><canvas id="rttChart"></canvas></div><div class="chart-container" style="margin-top:20px;"><canvas id="speedTestChart"></canvas></div><div class="chart-container" style="margin-top:20px;"><canvas id="wifiChart"></canvas></div></div>
+                <div class="chart-card card" style="margin-top:20px;">
+                    <div class="chart-header">
+                        <h3>Historical Performance (<span class="period-label"></span>)</h3>
+                        <div class="chart-zoom-controls" data-chart="rttChart">
+                             <button data-zoom="in">Zoom In</button><button data-zoom="out">Zoom Out</button><button data-zoom="reset">Reset</button>
+                        </div>
+                    </div>
+                    <div class="chart-container"><canvas id="rttChart"></canvas></div>
+                    <div class="chart-container" style="margin-top:20px;"><canvas id="speedTestChart"></canvas></div>
+                    <div class="chart-container" style="margin-top:20px;"><canvas id="wifiChart"></canvas></div>
+                </div>
             </div>
         </div>
     </div>
@@ -254,21 +277,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const isDark = document.body.classList.contains('dark-mode');
         const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
         const textColor = isDark ? '#e0e0e0' : '#333';
-        const colors = ['#36a2eb', '#ff6384', '#ff9f40', '#4bc0c0'];
+        const colors = ['#36a2eb', '#ff6384', '#ff9f40', '#4bc0c0', '#9966ff', '#ffc107'];
 
         let yAxesCount = 0;
         const datasets = Object.entries(seriesConfig).map(([label, key], index) => {
             const isLoss = label.includes('Loss');
             const yAxisID = isLoss ? 'y1' : 'y';
             if(isLoss) yAxesCount++;
+            
+            // MRTG Style: Use a less intense color for the fill area
+            const borderColor = colors[index % colors.length];
+            const backgroundColor = borderColor + '4D'; // ~30% opacity
+
             return {
                 label,
                 data: data.map(d => d[key]),
-                borderColor: colors[index % colors.length],
-                backgroundColor: colors[index % colors.length] + '33', // Add alpha for fill
+                borderColor: borderColor,
+                backgroundColor: backgroundColor,
                 type: isLoss ? 'bar' : 'line',
                 tension: 0.3,
-                fill: !isLoss,
+                fill: !isLoss, // Fill area for lines, not for bars
                 yAxisID: yAxisID,
                 order: isLoss ? 1 : 0 // Draw bars behind lines
             };
@@ -290,7 +318,11 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             plugins: {
                 legend: { labels: { color: textColor } },
-                tooltip: { titleFont: { weight: 'bold' }, bodyFont: { size: 14 } }
+                tooltip: { titleFont: { weight: 'bold' }, bodyFont: { size: 14 } },
+                zoom: {
+                    pan: { enabled: true, mode: 'x' },
+                    zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+                }
             }
         };
         // Add second Y axis only if 'Loss' data is present
@@ -305,9 +337,33 @@ document.addEventListener('DOMContentLoaded', () => {
         chartInstances[canvasId] = new Chart(ctx, { type: 'line', data: { labels: data.map(d => d[xKey]), datasets }, options: chartOptions });
     };
     
+    const handleZoom = (chartId, direction) => {
+        const chart = chartInstances[chartId];
+        if (!chart) return;
+        if (direction === 'reset') {
+            chart.resetZoom();
+        } else {
+            const zoomFactor = direction === 'in' ? 1.2 : 0.8;
+            chart.zoom(zoomFactor);
+        }
+    };
+
     const applyTheme = (isDark) => { document.body.classList.toggle('dark-mode', isDark); fetchAndUpdateDashboard(profileSelector.value, currentPeriodDays); };
     
-    document.body.addEventListener('click', e => { if(e.target.closest('.agent-list-item')) { const agentId = e.target.closest('.agent-list-item').dataset.id; profileSelector.value = agentId; history.pushState({agentId}, '', `?isp_id=${agentId}`); fetchAndUpdateDashboard(agentId, currentPeriodDays); } });
+    document.body.addEventListener('click', e => { 
+        if(e.target.closest('.agent-list-item')) { 
+            const agentId = e.target.closest('.agent-list-item').dataset.id; 
+            profileSelector.value = agentId; 
+            history.pushState({agentId}, '', `?isp_id=${agentId}`); 
+            fetchAndUpdateDashboard(agentId, currentPeriodDays); 
+        }
+        if (e.target.closest('.chart-zoom-controls button')) {
+            const button = e.target.closest('button');
+            const chartId = button.parentElement.dataset.chart;
+            const zoomType = button.dataset.zoom;
+            handleZoom(chartId, zoomType);
+        }
+    });
     profileSelector.addEventListener('change', e => { const agentId = e.target.value; const url = agentId ? `?isp_id=${agentId}` : './'; history.pushState({agentId}, '', url); fetchAndUpdateDashboard(agentId, currentPeriodDays); });
     periodSelector.addEventListener('click', e => { if(e.target.tagName === 'BUTTON'){ currentPeriodDays = e.target.dataset.period; fetchAndUpdateDashboard(profileSelector.value, currentPeriodDays); }});
     themeToggle.addEventListener('change', () => { const isDark = themeToggle.checked; localStorage.setItem('dark-mode', isDark); applyTheme(isDark); });
