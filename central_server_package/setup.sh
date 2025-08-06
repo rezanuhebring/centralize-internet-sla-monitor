@@ -93,21 +93,33 @@ sudo apt-get update -y || { print_error "Apt update failed."; exit 1; }
 # Install Docker, Docker Compose, Certbot, SQLite3
 # Install Docker, Docker Compose, Certbot, SQLite3
 if ! command -v docker &> /dev/null; then
-    print_info "Installing Docker...";
-    (sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common jq && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - && sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" -y && sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io && sudo systemctl start docker && sudo systemctl enable docker) || { print_error "Docker installation failed"; exit 1; }
+    print_info "Installing Docker..."
+    (
+        sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common jq &&
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - &&
+        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" -y &&
+        sudo apt-get update -y &&
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io &&
+        sudo systemctl start docker && sudo systemctl enable docker
+    ) || { print_error "Docker installation failed"; exit 1; }
 else
     print_info "Docker is already installed."
 fi
+
 if ! command -v docker-compose &> /dev/null; then
-    print_info "Installing Docker Compose...";
-    (LATEST_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name);
-    [ -z "$LATEST_COMPOSE_VERSION" ] && LATEST_COMPOSE_VERSION="v2.24.6";
-    sudo curl -L "https://github.com/docker/compose/releases/download/${LATEST_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose) || { print_error "Docker Compose download failed"; exit 1; }
+    print_info "Installing Docker Compose..."
+    (
+        LATEST_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)
+        [ -z "$LATEST_COMPOSE_VERSION" ] && LATEST_COMPOSE_VERSION="v2.24.6"
+        sudo curl -L "https://github.com/docker/compose/releases/download/${LATEST_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose &&
+        sudo chmod +x /usr/local/bin/docker-compose
+    ) || { print_error "Docker Compose download failed"; exit 1; }
 else
     print_info "Docker Compose is already installed."
 fi
+
 if ! command -v certbot &> /dev/null || ! command -v sqlite3 &> /dev/null; then
-    print_info "Installing Certbot and SQLite3...";
+    print_info "Installing Certbot and SQLite3..."
     sudo apt-get install -y certbot sqlite3 php-cli
 else
     print_info "Certbot, SQLite3, and PHP CLI are already installed."
