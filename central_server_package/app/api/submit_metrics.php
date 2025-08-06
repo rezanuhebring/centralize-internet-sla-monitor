@@ -1,12 +1,13 @@
 <?php
 // submit_metrics.php - FINAL PRODUCTION VERSION
-// Correctly handles new summary fields and INSERT/UPDATE logic.
+// Now includes API Key authentication.
 
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
 // --- Configuration ---
 $db_file = '/opt/sla_monitor/central_sla_data.sqlite';
+$config_file = '/opt/sla_monitor/sla_config.env';
 $log_file_api = '/var/log/sla_api.log';
 
 // --- Helper Functions ---
@@ -14,8 +15,34 @@ function api_log($message) {
     file_put_contents($GLOBALS['log_file_api'], date('[Y-m-d H:i:s T] ') . '[SubmitMetrics] ' . $message . PHP_EOL, FILE_APPEND);
 }
 
+function load_config($file_path) {
+    if (!file_exists($file_path)) return [];
+    $lines = file($file_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $config = [];
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) continue;
+        list($key, $value) = explode('=', $line, 2);
+        $config[trim($key)] = trim($value);
+    }
+    return $config;
+}
+
 // --- Main Logic ---
 header("Content-Type: application/json");
+
+// --- API Key Authentication ---
+$config = load_config($config_file);
+$master_api_key = $config['CENTRAL_API_KEY'] ?? '';
+
+if (!empty($master_api_key)) {
+    $provided_api_key = $_SERVER['HTTP_X_API_KEY'] ?? '';
+    if (!hash_equals($master_api_key, $provided_api_key)) {
+        http_response_code(401);
+        api_log("Unauthorized: Invalid or missing API key. Provided: '{$provided_api_key}'");
+        echo json_encode(['status' => 'error', 'message' => 'Unauthorized: API Key is invalid or missing.']);
+        exit;
+    }
+}
 
 $input_data = json_decode(file_get_contents('php://input'), true);
 
@@ -67,6 +94,8 @@ try {
         $stmt_create_profile->close();
     }
     
+    // ... (previous code remains the same up to this point)
+
     // Helper function to safely get nested values from JSON payload
     function get_nested_value($array, $keys, $type = 'text') { $current = $array; foreach ($keys as $key) { if (!isset($current[$key])) return null; $current = $current[$key]; } if ($current === 'N/A' || $current === '') return null; return $type === 'float' ? (float)$current : ($type === 'int' ? (int)$current : $current); }
     
@@ -85,20 +114,70 @@ try {
     $st_ul = get_nested_value($input_data, ['speed_test', 'upload_mbps'], 'float');
     $st_ping = get_nested_value($input_data, ['speed_test', 'ping_ms'], 'float');
     $st_jitter = get_nested_value($input_data, ['speed_test', 'jitter_ms'], 'float');
+    
+    // New Wi-Fi Metrics
+    $wifi_status = get_nested_value($input_data, ['wifi_info', 'status']);
+    $wifi_ssid = get_nested_value($input_data, ['wifi_info', 'ssid']);
+    $wifi_bssid = get_nested_value($input_data, ['wifi_info', 'bssid']);
+    $wifi_signal = get_nested_value($input_data, ['wifi_info', 'signal_strength_percent'], 'int');
+    $wifi_channel = get_nested_value($input_data, ['wifi_info', 'channel'], 'int');
+    $wifi_band = get_nested_value($input_data, ['wifi_info', 'band']);
+
     $detailed_health_summary = htmlspecialchars($input_data['detailed_health_summary'] ?? 'UNKNOWN', ENT_QUOTES, 'UTF-8');
     $sla_met_interval = (isset($input_data['current_sla_met_status']) && $input_data['current_sla_met_status'] === 'MET') ? 1 : 0;
     
     // Insert the new metrics into the database
-    $stmt = $db->prepare("INSERT OR IGNORE INTO sla_metrics (isp_profile_id, timestamp, overall_connectivity, avg_rtt_ms, avg_loss_percent, avg_jitter_ms, dns_status, dns_resolve_time_ms, http_status, http_response_code, http_total_time_s, speedtest_status, speedtest_download_mbps, speedtest_upload_mbps, speedtest_ping_ms, speedtest_jitter_ms, detailed_health_summary, sla_met_interval) VALUES (:isp_id, :ts, :conn, :rtt, :loss, :jitter, :dns_stat, :dns_time, :http_stat, :http_code, :http_time, :st_stat, :st_dl, :st_ul, :st_ping, :st_jit, :health, :sla_met)");
-    $stmt->bindValue(':isp_id', $isp_profile_id, SQLITE3_INTEGER); $stmt->bindValue(':ts', $timestamp, SQLITE3_TEXT); $stmt->bindValue(':conn', $ping_status, SQLITE3_TEXT); $stmt->bindValue(':rtt', $avg_rtt_ms, $avg_rtt_ms === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':loss', $avg_loss_percent, $avg_loss_percent === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':jitter', $avg_jitter_ms, $avg_jitter_ms === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':dns_stat', $dns_status, SQLITE3_TEXT); $stmt->bindValue(':dns_time', $dns_resolve_time_ms, $dns_resolve_time_ms === null ? SQLITE3_NULL : SQLITE3_INTEGER); $stmt->bindValue(':http_stat', $http_status, SQLITE3_TEXT); $stmt->bindValue(':http_code', $http_response_code, $http_response_code === null ? SQLITE3_NULL : SQLITE3_INTEGER); $stmt->bindValue(':http_time', $http_total_time_s, $http_total_time_s === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':st_stat', $st_status, SQLITE3_TEXT); $stmt->bindValue(':st_dl', $st_dl, $st_dl === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':st_ul', $st_ul, $st_ul === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':st_ping', $st_ping, $st_ping === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':st_jit', $st_jitter, $st_jitter === null ? SQLITE3_NULL : SQLITE3_FLOAT); $stmt->bindValue(':health', $detailed_health_summary, SQLITE3_TEXT); $stmt->bindValue(':sla_met', $sla_met_interval, SQLITE3_INTEGER);
+    $stmt = $db->prepare("
+        INSERT OR IGNORE INTO sla_metrics (
+            isp_profile_id, timestamp, overall_connectivity, avg_rtt_ms, avg_loss_percent, avg_jitter_ms, 
+            dns_status, dns_resolve_time_ms, http_status, http_response_code, http_total_time_s, 
+            speedtest_status, speedtest_download_mbps, speedtest_upload_mbps, speedtest_ping_ms, speedtest_jitter_ms,
+            wifi_status, wifi_ssid, wifi_bssid, wifi_signal_strength_percent, wifi_channel, wifi_band,
+            detailed_health_summary, sla_met_interval
+        ) VALUES (
+            :isp_id, :ts, :conn, :rtt, :loss, :jitter, 
+            :dns_stat, :dns_time, :http_stat, :http_code, :http_time, 
+            :st_stat, :st_dl, :st_ul, :st_ping, :st_jit,
+            :wifi_status, :wifi_ssid, :wifi_bssid, :wifi_signal, :wifi_channel, :wifi_band,
+            :health, :sla_met
+        )
+    ");
+    
+    // Bind all the values
+    $stmt->bindValue(':isp_id', $isp_profile_id, SQLITE3_INTEGER);
+    $stmt->bindValue(':ts', $timestamp, SQLITE3_TEXT);
+    $stmt->bindValue(':conn', $ping_status, SQLITE3_TEXT);
+    $stmt->bindValue(':rtt', $avg_rtt_ms, $avg_rtt_ms === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':loss', $avg_loss_percent, $avg_loss_percent === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':jitter', $avg_jitter_ms, $avg_jitter_ms === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':dns_stat', $dns_status, SQLITE3_TEXT);
+    $stmt->bindValue(':dns_time', $dns_resolve_time_ms, $dns_resolve_time_ms === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+    $stmt->bindValue(':http_stat', $http_status, SQLITE3_TEXT);
+    $stmt->bindValue(':http_code', $http_response_code, $http_response_code === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+    $stmt->bindValue(':http_time', $http_total_time_s, $http_total_time_s === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':st_stat', $st_status, SQLITE3_TEXT);
+    $stmt->bindValue(':st_dl', $st_dl, $st_dl === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':st_ul', $st_ul, $st_ul === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':st_ping', $st_ping, $st_ping === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':st_jit', $st_jitter, $st_jitter === null ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $stmt->bindValue(':wifi_status', $wifi_status, SQLITE3_TEXT);
+    $stmt->bindValue(':wifi_ssid', $wifi_ssid, SQLITE3_TEXT);
+    $stmt->bindValue(':wifi_bssid', $wifi_bssid, SQLITE3_TEXT);
+    $stmt->bindValue(':wifi_signal', $wifi_signal, $wifi_signal === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+    $stmt->bindValue(':wifi_channel', $wifi_channel, $wifi_channel === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+    $stmt->bindValue(':wifi_band', $wifi_band, SQLITE3_TEXT);
+    $stmt->bindValue(':health', $detailed_health_summary, SQLITE3_TEXT);
+    $stmt->bindValue(':sla_met', $sla_met_interval, SQLITE3_INTEGER);
     
     if ($stmt->execute()) {
         $db->exec('COMMIT');
-        api_log("OK: Metrics inserted for agent: {$agent_identifier}");
+        api_log("OK: Metrics (including Wi-Fi) inserted for agent: {$agent_identifier}");
         echo json_encode(['status' => 'success', 'message' => 'Metrics received for agent ' . $agent_identifier]);
     } else {
         throw new Exception("Failed to insert metrics data: " . $db->lastErrorMsg());
     }
+    
+    // ... (rest of the script remains the same)
     
 } catch (Exception $e) {
     if ($db) { $db->exec('ROLLBACK'); }

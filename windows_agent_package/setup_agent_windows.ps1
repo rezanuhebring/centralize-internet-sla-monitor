@@ -1,34 +1,72 @@
 <#
 .SYNOPSIS
-    Automated setup for the Windows PowerShell SLA Monitoring Agent. FINAL PRODUCTION VERSION.
+    Interactive setup for the Windows PowerShell SLA Monitoring Agent.
 .DESCRIPTION
-    This script includes a robust and reliable method for adding the Speedtest path
-    to the agent's configuration file, fixing the "path not found" error.
+    This script self-elevates, installs dependencies, prompts the user for
+    configuration details, and then creates the necessary files and scheduled task.
 #>
 param()
 
 # --- Self-Elevation to Administrator ---
 if (-Not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "Requesting Administrator privileges..."
     $arguments = "-ExecutionPolicy Bypass -File `"$($myInvocation.mycommand.definition)`""
     Start-Process powershell -Verb runAs -ArgumentList $arguments
     exit
 }
 
-# --- Pre-flight Checks and Configuration ---
-Write-Host "Starting Windows SLA Monitor Agent Setup (Running as Administrator)..." -ForegroundColor Yellow
+# --- Helper Functions ---
+function Prompt-Input {
+    param(
+        [string]$PromptText,
+        [string]$DefaultValue,
+        [switch]$AllowEmpty
+    )
+    $UserInput = ""
+    while ($true) {
+        if ($DefaultValue) {
+            $UserInput = Read-Host -Prompt "$PromptText [$DefaultValue]"
+            if ([string]::IsNullOrWhiteSpace($UserInput)) { $UserInput = $DefaultValue }
+        } else {
+            $UserInput = Read-Host -Prompt "$PromptText"
+        }
 
+        if (-not [string]::IsNullOrWhiteSpace($UserInput)) {
+            return $UserInput
+        } elseif ($AllowEmpty.IsPresent) {
+            return ""
+        } else {
+            Write-Warning "This field cannot be empty."
+        }
+    }
+}
+
+# --- Pre-flight Checks and Configuration ---
+Write-Host "Starting Interactive Windows SLA Monitor Agent Setup..." -ForegroundColor Yellow
 $AgentSourcePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AgentInstallDir = "C:\SLA_Monitor_Agent"
 $SpeedtestInstallDir = Join-Path $AgentInstallDir "speedtest"
 $SpeedtestExePath = Join-Path $SpeedtestInstallDir "speedtest.exe"
 $MonitorScriptName = "Monitor-InternetAgent.ps1"
-$ConfigTemplateName = "agent_config.ps1.template"
-$DestinationConfigName = "agent_config.ps1"
-$DestinationConfigPath = Join-Path $AgentInstallDir $DestinationConfigName
+$DestinationConfigPath = Join-Path $AgentInstallDir "agent_config.ps1"
 
-# --- 1. Install Dependencies (Ookla Speedtest) ---
+# --- 1. Gather User Configuration ---
+Write-Host "`nPlease provide the agent's configuration details." -ForegroundColor Cyan
+$CentralApiUrl = Prompt-Input -PromptText "Enter the Central API URL (e.g., http://192.168.1.10/api/submit_metrics.php)"
+$AgentIdentifier = Prompt-Input -PromptText "Enter a Unique Agent Identifier for this machine"
+$AgentType = Prompt-Input -PromptText "Enter the Agent Type" -DefaultValue "Client"
+$CentralApiKey = Prompt-Input -PromptText "Enter the Central API Key (optional, press Enter to skip)" -AllowEmpty
+$MonitorFrequency = 0
+while ($MonitorFrequency -lt 1 -or $MonitorFrequency -gt 59) {
+    try {
+        $MonitorFrequency = [int](Prompt-Input -PromptText "Enter the monitoring frequency in minutes (1-59)" -DefaultValue "15")
+        if ($MonitorFrequency -lt 1 -or $MonitorFrequency -gt 59) { Write-Warning "Please enter a number between 1 and 59." }
+    } catch { Write-Warning "Invalid input. Please enter a number." }
+}
+
+# --- 2. Install Dependencies (Ookla Speedtest) ---
 if (-not (Test-Path $SpeedtestExePath)) {
-    Write-Host "Ookla Speedtest not found. Starting automatic installation..." -ForegroundColor Cyan
+    Write-Host "`nOokla Speedtest not found. Starting automatic installation..." -ForegroundColor Cyan
     $SpeedtestZipUrl = "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-win64.zip"
     $TempZipPath = Join-Path $env:TEMP "speedtest.zip"
     try {
@@ -37,63 +75,72 @@ if (-not (Test-Path $SpeedtestExePath)) {
         Write-Host "- Cleaning up temporary files..."; Remove-Item $TempZipPath -Force
         Write-Host "Speedtest installation successful." -ForegroundColor Green
     } catch { Write-Error "Failed to download or install Speedtest: $($_.Exception.Message)"; Read-Host "Press Enter to exit"; exit 1 }
-} else { Write-Host "Ookla Speedtest is already installed." }
+} else { Write-Host "`nOokla Speedtest is already installed." }
 
-# --- 2. Deploy Agent Scripts ---
+# --- 3. Deploy Agent Scripts & Generate Config ---
 if (-not (Test-Path $AgentInstallDir)) { New-Item -Path $AgentInstallDir -ItemType Directory -Force | Out-Null }
-Write-Host "Copying agent scripts..."
+Write-Host "`nDeploying agent scripts..." -ForegroundColor Cyan
 try {
     Copy-Item -Path (Join-Path $AgentSourcePath $MonitorScriptName) -Destination (Join-Path $AgentInstallDir $MonitorScriptName) -Force -ErrorAction Stop
-    Write-Host "- Copied $MonitorScriptName"
-    if (-not (Test-Path $DestinationConfigPath)) {
-        Copy-Item -Path (Join-Path $AgentSourcePath $ConfigTemplateName) -Destination $DestinationConfigPath -Force -ErrorAction Stop
-        Write-Host "- Copied $ConfigTemplateName as initial configuration to $DestinationConfigName." -ForegroundColor Magenta
-    } else { Write-Host "- Config file $DestinationConfigPath already exists. Skipping copy." -ForegroundColor Yellow }
-} catch { Write-Error "Failed to copy agent files: $($_.Exception.Message)"; Read-Host "Press Enter to exit"; exit 1 }
+    Write-Host "- Copied monitoring script."
+    
+    # Generate the config file content
+    $ConfigContent = @"
+# ==============================================================================
+#              SLA Monitor Agent Configuration (Generated by Setup)
+# ==============================================================================
+# Mandatory Settings
+`$AGENT_IDENTIFIER = "$AgentIdentifier"
+`$CENTRAL_API_URL  = "$CentralApiUrl"
 
-# --- 3. Add Speedtest Path to Agent Config ---
-Write-Host "Verifying Speedtest path in agent configuration..."
-try {
-    # *** FIX: Use robust Select-String to check if the line already exists ***
-    $LineExists = Select-String -Path $DestinationConfigPath -Pattern '^\$SPEEDTEST_EXE_PATH' -Quiet
-    if (-not $LineExists) {
-        $ConfigLine = "`n`$SPEEDTEST_EXE_PATH = `"$SpeedtestExePath`""
-        Add-Content -Path $DestinationConfigPath -Value $ConfigLine
-        Write-Host "Speedtest path configured successfully in '$DestinationConfigPath'." -ForegroundColor Green
-    } else {
-        Write-Host "Speedtest path is already correctly configured in the file."
-    }
-} catch {
-    Write-Error "Failed to update config file with Speedtest path. Error: $($_.Exception.Message)"
-}
+# Optional Settings
+`$AGENT_TYPE       = "$AgentType"
+`$CENTRAL_API_KEY  = "$CentralApiKey"
+
+# Test Enable/Disable Flags (can be overridden by central profile)
+`$ENABLE_PING      = `$true
+`$ENABLE_DNS       = `$true
+`$ENABLE_HTTP      = `$true
+`$ENABLE_SPEEDTEST = `$true
+    
+# Fine-Tuning Parameters
+`$PING_HOSTS       = @("8.8.8.8", "8.8.4.4", "google.com")
+`$PING_COUNT       = 10
+`$DNS_CHECK_HOST   = "www.google.com"
+`$HTTP_CHECK_URL   = "https://www.google.com"
+
+# Path to Speedtest executable (automatically added by setup)
+`$SPEEDTEST_EXE_PATH = "$SpeedtestExePath"
+"@
+    Set-Content -Path $DestinationConfigPath -Value $ConfigContent -Force
+    Write-Host "- Generated configuration file at '$DestinationConfigPath'." -ForegroundColor Green
+
+} catch { Write-Error "Failed to copy agent files or create config: $($_.Exception.Message)"; Read-Host "Press Enter to exit"; exit 1 }
 
 # --- 4. Accept License Terms Silently ---
-Write-Host "Attempting to accept Speedtest license terms..."
+Write-Host "`nAttempting to accept Speedtest license terms..." -ForegroundColor Cyan
 try { & $SpeedtestExePath --accept-license --accept-gdpr | Out-Null }
 catch { Write-Warning "Could not run speedtest.exe to accept license. This may be a temporary network issue. Error: $($_.Exception.Message)" }
 
 # --- 5. Create/Update Scheduled Task ---
 $TaskName = "InternetSLAMonitorAgent"
+Write-Host "`nRegistering scheduled task '$TaskName' to run every $MonitorFrequency minutes..." -ForegroundColor Cyan
 $TaskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$AgentInstallDir\$MonitorScriptName`""
-$TaskTrigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 15) -Once -At (Get-Date)
+$TaskTrigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes $MonitorFrequency) -Once -At (Get-Date)
 $TaskPrincipal = New-ScheduledTaskPrincipal -UserID "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 1) -MultipleInstances IgnoreNew
-Write-Host "Registering scheduled task '$TaskName'..."
 try {
     Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
     Register-ScheduledTask -TaskName $TaskName -Action $TaskAction -Trigger $TaskTrigger -Principal $TaskPrincipal -Settings $TaskSettings -ErrorAction Stop
-    Write-Host "Scheduled task '$TaskName' created/updated successfully."
+    Write-Host "Scheduled task '$TaskName' created/updated successfully." -ForegroundColor Green
 } catch { Write-Error "Failed to register task '$TaskName': $($_.Exception.Message)"; Write-Warning "You may need to create the task manually." }
 
 # --- Final Instructions ---
 Write-Host "`nWindows SLA Monitor Agent Setup Complete." -ForegroundColor Green
 Write-Host "--------------------------------------------------------------------"
-Write-Host "NEXT STEPS:"
-Write-Host "1. CRITICAL: Review/edit the configuration file with this agent's unique details:"
-Write-Host "   notepad `"$DestinationConfigPath`""
-Write-Host "2. Test the script by running it directly from an Administrator PowerShell:"
+Write-Host "You can test the script by running it directly from an Administrator PowerShell:"
 Write-Host "   & `"$AgentInstallDir\$MonitorScriptName`""
-Write-Host "3. Check the agent's log file for output:"
+Write-Host "Check the agent's log file for output:"
 Write-Host "   Get-Content `"$AgentInstallDir\internet_monitor_agent_windows.log`" -Tail 10 -Wait"
 Write-Host "--------------------------------------------------------------------"
 Read-Host "Press Enter to exit"
