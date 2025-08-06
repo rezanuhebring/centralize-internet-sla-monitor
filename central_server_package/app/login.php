@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Regenerate session ID to prevent session fixation
         session_regenerate_id(true);
         $_SESSION['loggedin'] = true;
-        header('Location: index.html');
+        header('Location: index.php');
         exit;
     } else {
         header('Location: login.html?error=Invalid credentials');
