@@ -49,7 +49,7 @@ if [ -d "${HOST_DATA_ROOT}" ]; then
     print_warn "Entering MIGRATION mode. Your data will be preserved."
     MIGRATION_MODE=true
     
-    if [ "$(docker ps -q -f name=^/${APP_SERVICE_NAME}$")" ]; then
+    if [ "$(docker ps -q -f name=^/${APP_SERVICE_NAME}$\)" ]; then
         print_info "Stopping the old running container..."
         if [ -f "${DOCKER_COMPOSE_FILE_NAME}" ]; then
              sudo docker-compose down
@@ -287,7 +287,7 @@ else
             sudo echo -e "\nCENTRAL_API_KEY=${API_KEY}" >> "${SLA_CONFIG_HOST_PATH}"
         fi
         if ! grep -q "^DASHBOARD_USERNAME=" "${SLA_CONFIG_HOST_PATH}"; then
-            print_warn "Dashboard credentials not found. Adding them now."
+            print_warn "Dashboard credentials not found. Adding them.
             PASSWORD_HASH=$(php -r "echo password_hash('$DASHBOARD_PASSWORD', PASSWORD_DEFAULT);")
             echo "DASHBOARD_USERNAME=${DASHBOARD_USERNAME}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
             echo "DASHBOARD_PASSWORD_HASH=${PASSWORD_HASH}" | sudo tee -a "${SLA_CONFIG_HOST_PATH}" > /dev/null
